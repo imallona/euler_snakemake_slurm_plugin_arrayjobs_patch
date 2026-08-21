@@ -1,13 +1,11 @@
 #!/bin/bash
-# Step 0. Settles what can be settled without submitting anything: the versions
-# in play, the cluster's array limits, whether the plugin is patched, and the
-# sbatch line each mode would use.
+# Reports the installed versions, the cluster's array limits, whether the
+# plugin is patched, and the sbatch line each mode would use.
 #
 #   sbatch slurm/00_probe.sh
 #
 # Run it once on a cluster this has never run on, and again after any change to
-# the snakemake environment. It submits no child jobs, so it costs one short
-# allocation and tells you whether 01_compare.sh is worth starting.
+# the snakemake environment. It submits no child jobs.
 #
 #SBATCH --job-name=arrayjobs-probe
 #SBATCH --time=00:15:00
@@ -28,11 +26,13 @@ sacctmgr -n show assoc where user="$USER" format=account%20,maxsubmit,maxjobs 2>
 echo
 
 echo "=================== the three plans ==================="
-# Each mode differs only in the flags, so printing them side by side is the
-# whole comparison up front.
+# Captured rather than piped: the command line is the first line of the
+# target's output and the job counts are near the last.
 for mode in plain array group; do
     echo "------------------- $mode"
-    make dry MODE="$mode" 2>&1 | tail -25
+    plan="$(make dry MODE="$mode" 2>&1)"
+    printf '%s\n' "$plan" | head -1
+    printf '%s\n' "$plan" | grep -m 1 -A 6 "^Job stats:" || printf '%s\n' "$plan" | tail -20
     echo
 done
 

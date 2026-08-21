@@ -1,8 +1,7 @@
 # Snakemake profile for the ETH Euler cluster, sized for a test workflow rather
 # than for real work. Array submission is not turned on here: the Makefile adds
-# --slurm-array-jobs and --slurm-array-limit for the array mode, so one profile
-# serves the plain, array and group runs and the three differ only in the flags
-# the log records.
+# --slurm-array-jobs and --slurm-array-limit, so one profile serves the plain,
+# array and group runs.
 
 executor: slurm
 
@@ -20,10 +19,8 @@ default-resources:
 # and every rule here asks for ten minutes, so they all land in the short
 # partition.
 
-# The probe jobs are one core and a sleep, so the only limit that matters is
-# how many the plugin is willing to have in flight. This has to be at least
-# n_tasks, otherwise the jobs of the rule never become ready at the same time
-# and the plugin has nothing to build an array from.
+# At least n_tasks, otherwise the jobs of the rule never become ready at the
+# same time and the plugin has nothing to build an array from.
 jobs: 64
 
 # Euler asks that Slurm not be flooded. The plugin's default is ten per second.
@@ -34,15 +31,14 @@ local-cores: 4
 # Lustre metadata lags behind a job that has just written its output.
 latency-wait: 60
 
-# Zero, unlike the production profiles. A retry would resubmit the failed tasks
-# as plain jobs once only one is left, which hides the defect being measured.
+# Zero, unlike the production profiles. A retry resubmits the failed tasks, and
+# once one is left the plugin sends it as a plain job, which succeeds.
 retries: 0
 
 printshellcmds: true
 rerun-incomplete: true
 
-# Both of these exist for reading afterwards. The plugin deletes successful job
-# logs by default, and puts them under .snakemake by default, where they are
-# easy to lose.
+# The plugin deletes successful job logs by default, and writes them under
+# .snakemake.
 slurm-keep-successful-logs: true
 slurm-logdir: slurm/snakemake_logs

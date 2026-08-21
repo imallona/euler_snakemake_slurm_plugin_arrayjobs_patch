@@ -1,15 +1,15 @@
 # Shared setup for the drivers here. Sourced, not executed.
 #
-# Each driver is one batch job that holds snakemake while it submits the probe
-# jobs and waits for them. Nothing runs on a login node except the environment
-# activation, which sbatch then exports into the job.
+# Each driver is one batch job holding snakemake while it submits the probe jobs
+# and waits for them. Only the environment activation happens on a login node,
+# and sbatch exports it into the job.
 
 set -euo pipefail
 
 # Slurm points TMPDIR at this node's local disk and the executor plugin submits
 # every child with --export=ALL, so an inherited value would send a child to a
-# path belonging to another node. Nothing here writes to TMPDIR, but the probe
-# records whatever it finds, which makes the guard's effect visible.
+# path belonging to another node. Nothing here writes to TMPDIR, and the probe
+# records whatever value it finds.
 unset TMPDIR
 
 cd "${SLURM_SUBMIT_DIR:-$PWD}"

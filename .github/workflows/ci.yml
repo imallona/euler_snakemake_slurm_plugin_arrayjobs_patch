@@ -1,0 +1,85 @@
+name: tests
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The two versions scripts/patch_slurm_plugin.py knows how to edit.
+        # 2.7.1 is what the Euler environment holds, 2.8.0 is the current
+        # release. On any other version the patch anchor test skips and the
+        # patch needs revisiting.
+        plugin: ["2.7.1", "2.8.0"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # pip rather than conda: no rule here deploys software, so nothing needs
+      # bioconda. The bioconda recipe for the plugin also pins a jobstep the
+      # plugin cannot use, which pip does not.
+      - name: Install
+        run: |
+          pip install --upgrade pip
+          pip install "snakemake==9.25.1" "snakemake-executor-plugin-slurm==${{ matrix.plugin }}" pytest ruff pyyaml
+
+      - name: Versions
+        run: make versions
+
+      - name: Lint
+        run: ruff check --select F,E9,RUF012,B,SIM scripts tests workflow
+
+      - name: Non-ASCII
+        run: |
+          if grep -rnP '[^\x00-\x7F]' --include='*.py' --include='*.sh' \
+               --include='*.yaml' --include='*.yml' --include='*.md' \
+               --include='Snakefile' --include='Makefile' \
+               config docs profiles scripts slurm tests workflow \
+               README.md Makefile; then
+            echo "non-ASCII found, see above"; exit 1
+          fi
+
+      - name: Shell scripts parse
+        run: for f in slurm/*.sh scripts/*.sh; do bash -n "$f"; done
+
+      - name: Unit tests
+        run: pytest -q tests
+
+      # The runner has no Slurm. A dry run never instantiates the executor, so
+      # this checks the Snakefile, the profile and the per mode flags together.
+      - name: Snakefile builds a DAG in every mode
+        run: |
+          for mode in plain array group; do
+            echo "--- $mode"
+            make dry MODE=$mode
+          done
+
+      - name: Workflow runs end to end locally
+        run: |
+          snakemake --snakefile workflow/Snakefile --cores 2 \
+            --config outdir=results/ci n_tasks=4 sleep_seconds=1
+          cat results/ci/verdict.txt
+          grep -q "not a cluster run" results/ci/verdict.txt
+
+      # Applies the patch to the installed plugin in the runner's own
+      # environment, checks the result still imports, and reverts.
+      - name: Patch applies and reverts
+        run: |
+          python scripts/patch_slurm_plugin.py --apply
+          python scripts/patch_slurm_plugin.py --status | grep -q "patched  yes"
+          python -c "import snakemake_executor_plugin_slurm"
+          python scripts/patch_slurm_plugin.py --revert
+          python scripts/patch_slurm_plugin.py --status | grep -q "patched  no"

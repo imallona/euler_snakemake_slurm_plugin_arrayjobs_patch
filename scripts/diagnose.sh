@@ -1,15 +1,13 @@
 #!/bin/bash
-# Slurm's own account of a run, next to what snakemake said about it.
+# Slurm's record of a run, next to snakemake's.
 #
 #   bash scripts/diagnose.sh                    the newest driver log
 #   bash scripts/diagnose.sh slurm/logs/x.out   a particular one
 #
-# Three things are worth reading here. Whether the child jobs carry an
-# underscore in their job id, which is the only reliable sign that an array was
-# used at all. What the plugin decided, which it says only at debug level, so
-# the run needs DEBUG=1. And which task each MissingOutputException names,
-# which is what distinguishes a mismatched array dispatch from an ordinary
-# missing file.
+# An underscore in a child job id is the sign that an array was used. The
+# plugin's array decisions are logged at debug level, so the run needs DEBUG=1.
+# The wildcard a MissingOutputException names separates a mismatched dispatch
+# from an ordinary missing file.
 
 set -uo pipefail
 
@@ -41,7 +39,7 @@ if [ -z "$start" ] || [ "$start" = "Unknown" ]; then
     echo "no start time for job $driver_job, falling back to $start"
 fi
 # -X keeps one line per job rather than one per step. Array tasks appear as
-# <parent>_<task>, which is the thing to look for.
+# <parent>_<task>.
 sacct -X -S "$start" -o JobID%18,JobName%38,State%12,Elapsed,ExitCode,ReqCPUS,NodeList%16 \
     | head -80
 echo
@@ -53,8 +51,7 @@ sacct -n -X -S "$start" -o JobID | grep -c "_" || true
 echo
 
 echo "=================== missing output errors ==================="
-# The name in the exception is the evidence. A task that was told to build
-# another task's output names a wildcard it never had.
+# A task told to build another task's output names a wildcard it never had.
 grep -A 4 "MissingOutputException" "$driver_log" | head -60
 if [ -d slurm/snakemake_logs ]; then
     echo

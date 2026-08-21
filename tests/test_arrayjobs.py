@@ -1,8 +1,8 @@
 """Offline checks. Nothing here needs a cluster.
 
-The two that matter are the verify tests: they feed synthetic probe records
-shaped like a mismatched array dispatch and like a correct one, so the
-detection is exercised without submitting anything.
+The verify tests feed synthetic probe records shaped like a mismatched array
+dispatch and like a correct one, so the detection runs without submitting
+anything.
 """
 
 import json
@@ -95,7 +95,7 @@ def test_partial_run_still_verifies(tmp_path):
     assert "probe records            1" in "\n".join(verify.verdict_lines(rows))
 
 
-def test_no_records_is_stated_plainly(tmp_path):
+def test_no_records(tmp_path):
     assert "never started" in "\n".join(verify.verdict_lines(verify.analyse([])))
 
 
@@ -111,7 +111,7 @@ def test_probe_parses_its_own_target_jobs():
 
 
 def test_patch_anchors_match_the_installed_plugin():
-    """The patch refuses to guess, so its anchors must be exact."""
+    """The patch matches on exact text, so its anchors must still be present."""
     try:
         path = patch_slurm_plugin.plugin_path()
     except SystemExit:
@@ -130,25 +130,25 @@ def test_patch_anchors_match_the_installed_plugin():
     assert text.count(patch_slurm_plugin.OLD_SUBMISSION_BRANCH) == 1
 
 
-def test_profile_declares_what_the_run_relies_on():
+def test_profile_settings():
     profile = yaml.safe_load((ROOT / "profiles" / "euler" / "config.yaml").read_text())
     assert profile["executor"] == "slurm"
     assert profile["default-resources"]["slurm_account"] == "es_platt"
     # Per core, because Euler documents --mem-per-cpu and not --mem.
     assert "mem_mb_per_cpu" in profile["default-resources"]
     assert "mem_mb" not in profile["default-resources"]
-    # A retry would resubmit the failed tasks as plain jobs and hide the defect.
+    # A retry resubmits the failed tasks, and the plugin sends the last one plain.
     assert profile["retries"] == 0
     # Both needed to read the per job logs afterwards.
     assert profile["slurm-keep-successful-logs"] is True
     assert profile["slurm-logdir"] == "slurm/snakemake_logs"
-    # An array needs more ready jobs than the default config asks for.
+    # An array is formed only from jobs ready at the same moment.
     config = yaml.safe_load((ROOT / "config" / "config.yaml").read_text())
     assert profile["jobs"] >= config["n_tasks"]
     assert config["n_tasks"] >= 2
 
 
-def test_workflow_builds_the_expected_dag(tmp_path):
+def test_dag_job_counts(tmp_path):
     if subprocess.run(["which", "snakemake"], capture_output=True).returncode != 0:
         pytest.skip("snakemake is not on PATH")
     result = subprocess.run(

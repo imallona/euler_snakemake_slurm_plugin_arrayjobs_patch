@@ -1,27 +1,23 @@
 """Make each Slurm array task run its own snakemake command.
 
-snakemake-executor-plugin-slurm 2.7.1 and 2.8.0 submit an array chunk with one
-wrapped command, the one belonging to the chunk's first job, and rely on the
-jobstep executor inside each task to substitute the command for that task's
-index. The substitution happens one process too deep: the wrapping snakemake
-still holds the first job's target, so when the inner command returns it checks
-the first job's output, does not find it, and fails with MissingOutputException
-naming a job that task never ran.
-
-This rewrites the submission so the batch script decodes the command for
-$SLURM_ARRAY_TASK_ID itself. The task then contains a single snakemake process,
-holding its own target, and the ordinary non-array code path in the jobstep
-executor runs it under srun. Nothing else about the plugin changes; the payload
-it already builds is what gets decoded.
+snakemake-executor-plugin-slurm 2.7.1 and 2.8.0 submit an array chunk with the
+wrapped command of its first job and substitute the per task command one
+process deeper, leaving the wrapper checking the first job's output in every
+task. See docs/adr/0001-slurm-array-jobs.md. This rewrites the submission so
+the batch script decodes the command for $SLURM_ARRAY_TASK_ID itself, using the
+payload the plugin already builds.
 
     python3 scripts/patch_slurm_plugin.py --status
     python3 scripts/patch_slurm_plugin.py --apply
     python3 scripts/patch_slurm_plugin.py --revert
 
 This edits the installed plugin inside the active conda environment. The
-original file is kept beside the patched one as __init__.py.orig and --revert
-restores it. Reinstalling or updating the plugin discards the patch, so check
---status again after any change to the environment.
+original is kept beside it as __init__.py.orig and --revert restores it.
+Reinstalling or updating the plugin discards the patch.
+
+The OLD_ constants below are verbatim excerpts of snakemake-executor-plugin-slurm
+2.7.1 and 2.8.0, which is MIT licensed, quoted so the edit matches on exact text.
+They remain under their original terms.
 """
 
 import argparse
@@ -92,7 +88,7 @@ def _array_dispatch_script(python_executable: str, payload: str) -> str:
 
     The payload is the mapping the plugin already builds: array task id to a
     zlib compressed, hex encoded snakemake command. Decoding it in the batch
-    script rather than one snakemake process deeper is the whole change.
+    script rather than one snakemake process deeper is the only change.
     """
     decoder = (
         "import base64, json, os, sys, zlib\\n"

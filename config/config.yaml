@@ -9,6 +9,5 @@ n_tasks: 12
 # short enough that a full comparison finishes inside one driver job.
 sleep_seconds: 20
 
-# Written to by the run. The Makefile puts each mode in its own directory so
-# plain, array and group results can be compared side by side.
+# The Makefile puts each mode in its own directory.
 outdir: results/plain

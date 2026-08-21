@@ -1,8 +1,6 @@
-# A workflow whose only product is evidence about how Slurm array jobs are
-# dispatched on Euler. Every probe job is independent, costs one core and a
-# short sleep, and writes down where it ran and which snakemake process chain
-# launched it. summarise then reads those records and states whether the
-# dispatch was correct.
+# Every probe job is independent, costs one core and a short sleep, and records
+# where it ran and which snakemake process chain launched it. summarise reads
+# those records and reports whether the dispatch was correct.
 #
 # Run it through the Makefile, which sets outdir, n_tasks and sleep_seconds and
 # adds the mode specific flags. See README.md.
@@ -26,8 +24,8 @@ rule all:
         OUTDIR / "verdict.txt",
 
 
-# The unit of the experiment. One core, no software deployment, no network, so
-# nothing but the scheduler and the executor plugin can make it fail.
+# One core, no software deployment, no network, so nothing but the scheduler
+# and the executor plugin can make it fail.
 rule probe:
     output:
         OUTDIR / "probe" / "task_{task}.json",
@@ -43,8 +41,8 @@ rule probe:
         "--sleep {params.sleep} --out {output}"
 
 
-# Reads every probe record at once, so it is a single job whatever the mode is,
-# and the plugin submits it as a plain job even with array submission on.
+# Reads every probe record at once, so it stays a single job in every mode and
+# the plugin submits it plainly even with array submission on.
 rule summarise:
     input:
         expand(str(OUTDIR / "probe" / "task_{task}.json"), task=TASKS),

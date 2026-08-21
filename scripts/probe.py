@@ -1,12 +1,9 @@
 """Record where a probe job ran and which process chain launched it.
 
-The process ancestry is the point. A Slurm array task submitted by
-snakemake-executor-plugin-slurm runs a chain of snakemake processes, and every
-link carries its own --target-jobs. If the outermost link names a task other
-than this one, the array dispatch is mismatched: the inner process makes this
-task's output while the outer one goes on to check a different task's output.
-That is what verify.py looks for, and reading the raw record by hand shows it
-just as clearly.
+A Slurm array task submitted by snakemake-executor-plugin-slurm runs a chain of
+snakemake processes, each carrying its own --target-jobs. An outermost link
+naming a task other than this one means the inner process builds this task's
+output while the outer one checks a different task's.
 """
 
 import argparse

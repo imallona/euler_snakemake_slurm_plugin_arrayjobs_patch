@@ -1,12 +1,11 @@
-# Entry points for the array job experiment. Every target assumes the
-# snakemake environment is already active: activate it on the Euler login node
-# before sbatch, which exports it into the batch job.
+# Every target assumes the snakemake environment is already active: activate it
+# on the Euler login node before sbatch, which exports it into the batch job.
 #
 #   make versions                what is installed, and whether it is patched
 #   make dry MODE=array          the plan and the flags, no submission
-#   make plain                   one sbatch per job, the control
-#   make array                   array submission, the thing under test
-#   make group                   group jobs, the working way to batch
+#   make plain                   one sbatch per job
+#   make array                   array submission
+#   make group                   several jobs of a rule per Slurm job
 #   make verify MODE=array       read the records of a finished or failed run
 #   make diagnose                sacct and log evidence for the last driver job
 #
@@ -25,8 +24,7 @@ GROUP_SIZE ?= 4
 ARRAY_LIMIT ?= 200
 PROFILE ?= profiles/euler
 RESULTS ?= results
-# On by default. The plugin logs its array decisions at debug level and those
-# lines are the point of this repository.
+# On by default. The plugin logs its array decisions only at debug level.
 DEBUG ?= 1
 EXTRA ?=
 
@@ -58,7 +56,7 @@ snakemake := snakemake $(base_args) $(mode_args) $(EXTRA)
         patch-status patch unpatch clean test
 
 help:
-	@sed -n '1,17p' Makefile
+	@awk '/^#/ {sub(/^# ?/, ""); print; next} {exit}' Makefile
 
 versions:
 	@echo "snakemake  $$(snakemake --version)"

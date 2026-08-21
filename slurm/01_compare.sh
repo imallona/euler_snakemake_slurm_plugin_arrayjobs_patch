@@ -1,6 +1,6 @@
 #!/bin/bash
-# Step 1. Runs the same twelve probe jobs three ways and reports what each
-# costs and whether each task ran its own work.
+# Runs the same probe jobs three ways and reports what each costs and whether
+# each task ran its own work.
 #
 #   sbatch slurm/01_compare.sh
 #   sbatch slurm/01_compare.sh MODES="array" N=40
@@ -10,9 +10,9 @@
 # make, so N, SLEEP, JOBS, GROUP_SIZE, ARRAY_LIMIT and EXTRA work here. MODES is
 # consumed by this script.
 #
-# The array mode is expected to fail on an unpatched plugin. That is the
-# measurement, not an accident, so a failing mode does not stop the script: it
-# runs verify against the records that did get written and moves on.
+# The array mode is expected to fail on an unpatched plugin, so a failing mode
+# does not stop the script: it runs verify against the records that did get
+# written and moves on.
 #
 #SBATCH --job-name=arrayjobs-compare
 #SBATCH --time=02:00:00

@@ -1,22 +1,13 @@
 """Turn probe records into a summary table and a verdict.
 
-Answers three questions that the snakemake log alone does not:
+Reports whether an array was formed, whether each task ran its own job, and how
+many sbatch calls the run cost. The snakemake log carries none of the three: a
+rule selected for array submission is still sent job by job until enough of its
+jobs are ready at once, and a mismatched dispatch surfaces only as a
+MissingOutputException naming an unrelated wildcard.
 
-  Was an array actually used?  A rule can be selected for array submission and
-  still be sent job by job, because the plugin only forms an array once enough
-  jobs of the rule are ready at the same time.
-
-  Did each array task run its own job?  In snakemake-executor-plugin-slurm
-  2.7.1 and 2.8.0 every task of a chunk is launched with the same wrapped
-  command, the one belonging to the chunk's first job. Each probe record names
-  the target of every snakemake process above it, so a mismatch between the
-  outermost target and the task's own wildcard is visible directly.
-
-  How many Slurm submissions did the run cost?  This is the number the array,
-  or a group job, is supposed to reduce.
-
-Usable both as the workflow's summarise rule and by hand on a run that failed
-part way, which is the normal case here:
+Runs as the workflow's summarise rule, and by hand on a run that failed part
+way:
 
     python3 scripts/verify.py --probes results/array/probe
 """
@@ -113,8 +104,8 @@ def verdict_lines(rows):
     elif len(arrayed) < total:
         lines.append(
             f"Only {len(arrayed)} of {total} tasks ran inside an array. The rest "
-            "were submitted one by one, which is what the plugin does with a rule "
-            "that has a single pending job left."
+            "were submitted one by one. The plugin does that with a rule that "
+            "has a single pending job left."
         )
 
     mismatched = [row for row in rows if not row["dispatch_ok"]]
