@@ -1,9 +1,14 @@
-"""Record where a probe job ran and which process chain launched it.
+"""Record where a probe job ran and which command the batch script carried.
 
 A Slurm array task submitted by snakemake-executor-plugin-slurm runs a chain of
-snakemake processes, each carrying its own --target-jobs. An outermost link
-naming a task other than this one means the inner process builds this task's
-output while the outer one checks a different task's.
+snakemake processes, each with its own --target-jobs. A batch script naming a
+task other than this one means the wrapper builds this task's output and then
+checks a different task's.
+
+The wrapper is not in this process's ancestry: srun launches its step under a
+separate slurmstepd, so walking /proc stops one snakemake short of it. The
+batch script comes from scontrol instead, and the ancestry is kept for the part
+of the chain that is visible.
 """
 
 import argparse
@@ -11,6 +16,7 @@ import json
 import os
 import re
 import socket
+import subprocess
 import time
 from pathlib import Path
 
@@ -86,6 +92,41 @@ def tasks_in_specs(specs):
     return sorted({match for spec in specs for match in re.findall(r"task=(\d+)", spec)})
 
 
+def batch_script():
+    """The batch script of this job, as the controller holds it.
+
+    For an array task this is the chunk's script, shared by every task, so its
+    --target-jobs is what the wrapper was told to build. Returns an empty
+    string outside Slurm, or when the controller has already forgotten the job.
+    """
+    job_id = os.environ.get("SLURM_JOB_ID")
+    if not job_id:
+        return ""
+    try:
+        result = subprocess.run(
+            ["scontrol", "write", "batch_script", job_id, "-"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return result.stdout if result.returncode == 0 else ""
+
+
+def specs_in_text(text):
+    """The --target-jobs values in a shell script or command string.
+
+    shlex would choke on the script's own quoting, so the specs are matched
+    directly. Snakemake writes them as RULE:WILDCARD=VALUE and quotes them when
+    they contain a comma.
+    """
+    specs = []
+    for match in re.finditer(r"--target-jobs[= ]+((?:'[^']*'|\"[^\"]*\"|[^\s'\"]+))", text):
+        specs.append(match.group(1).strip("'\""))
+    return specs
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--task", required=True, help="the task wildcard of this job")
@@ -97,7 +138,7 @@ def main():
     chain = ancestry()
 
     # Only the links that are snakemake processes carry a target. Keeping the
-    # depth makes "outermost" well defined for verify.py.
+    # depth orders them from this process outwards.
     snakemake_links = []
     for link in chain:
         specs = target_job_specs(link["argv"])
@@ -112,6 +153,9 @@ def main():
             }
         )
 
+    script = batch_script()
+    script_specs = specs_in_text(script)
+
     if args.sleep > 0:
         time.sleep(args.sleep)
 
@@ -124,6 +168,11 @@ def main():
         "finished": time.time(),
         "slurm": {name: os.environ.get(name) for name in SLURM_VARS},
         "snakemake_links": snakemake_links,
+        "batch_script": {
+            "target_job_specs": script_specs,
+            "target_tasks": tasks_in_specs(script_specs),
+            "text": script,
+        },
         "ancestry": [
             {"depth": link["depth"], "pid": link["pid"], "command": " ".join(link["argv"])}
             for link in chain

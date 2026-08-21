@@ -23,8 +23,8 @@ import patch_slurm_plugin  # noqa: E402
 def write_record(directory, task, array_task_id, outer_task):
     """One probe record, as probe.py would write it.
 
-    outer_task is the task named by the outermost snakemake process. It equals
-    task when the dispatch is correct and the chunk's first task when it is not.
+    outer_task is the task the batch script names. It equals task when the
+    dispatch is correct and the chunk's first task when it is not.
     """
     record = {
         "task": task,
@@ -47,13 +47,12 @@ def write_record(directory, task, array_task_id, outer_task):
                 "target_job_specs": [f"probe:task={task}"],
                 "target_tasks": [task],
             },
-            {
-                "depth": 2,
-                "pid": 2,
-                "target_job_specs": [f"probe:task={outer_task}"],
-                "target_tasks": [outer_task],
-            },
         ],
+        "batch_script": {
+            "target_job_specs": [f"probe:task={outer_task}"],
+            "target_tasks": [outer_task],
+            "text": f"#!/bin/sh\nsnakemake --target-jobs 'probe:task={outer_task}'\n",
+        },
         "ancestry": [],
     }
     path = directory / f"task_{task}.json"
@@ -170,3 +169,45 @@ def test_dag_job_counts(tmp_path):
     assert result.returncode == 0, result.stderr
     assert "probe" in result.stdout
     assert "summarise" in result.stdout
+
+
+def test_wrapper_target_falls_back_to_ancestry():
+    """A record with no batch script still reports the outermost link."""
+    record = {
+        "task": "004",
+        "snakemake_links": [
+            {"depth": 1, "pid": 3, "target_job_specs": [], "target_tasks": ["004"]},
+            {"depth": 3, "pid": 1, "target_job_specs": [], "target_tasks": ["001"]},
+        ],
+    }
+    assert verify.wrapper_target(record) == (["001"], "ancestry")
+    assert verify.wrapper_target({"task": "004"}) == ([], "")
+
+
+def test_probe_reads_target_jobs_out_of_a_batch_script():
+    import probe
+
+    script = (
+        "#!/bin/sh\n"
+        "/usr/bin/python -m snakemake --snakefile 'workflow/Snakefile' "
+        "--target-jobs 'probe:task=001' --allowed-rules probe "
+        "--executor slurm-jobstep --slurm-jobstep-array-execs=eyJ9\n"
+    )
+    assert probe.specs_in_text(script) == ["probe:task=001"]
+    assert probe.tasks_in_specs(probe.specs_in_text(script)) == ["001"]
+    assert probe.specs_in_text("#!/bin/sh\necho nothing\n") == []
+
+
+def test_ancestry_only_array_run_is_inconclusive(tmp_path):
+    """srun hides the wrapper, so an ancestry-only record proves nothing."""
+    for index, task in enumerate(["001", "002"], start=1):
+        path = write_record(tmp_path, task, index, outer_task=task)
+        record = json.loads(path.read_text())
+        del record["batch_script"]
+        path.write_text(json.dumps(record))
+
+    rows = verify.analyse(verify.collect([tmp_path]))
+    text = "\n".join(verify.verdict_lines(rows))
+    assert all(row["wrapper_source"] == "ancestry" for row in rows)
+    assert "says nothing about the dispatch" in text
+    assert "dispatch is correct" not in text

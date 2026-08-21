@@ -8,7 +8,7 @@ A reproducer and a patch for a Slurm array job defect, on ETH Euler.
 
 ## Defect
 
-In plugin 2.7.1 and 2.8.0 every task of an array chunk runs the wrapped command of the chunk's first job, so every task but the first fails with `MissingOutputException` naming a job it never ran. Euler allows arrays: `MaxArraySize` is 15000, with no per user submit limit. The source reading is in [ADR 0001](docs/adr/0001-slurm-array-jobs.md).
+In plugin 2.7.1 and 2.8.0 every task of an array chunk runs the wrapped command of the chunk's first job. Each task still builds its own output, but every wrapper then checks the first job's, so the run is correct only while the timing holds: a task that starts after that output exists finds nothing to do, exits 0, and writes nothing, and the driver raises `MissingOutputException` for it. Measured on Euler, one array of twelve simultaneous tasks passed and one of 54 staggered ones did not. Euler allows arrays: `MaxArraySize` is 15000, with no per user submit limit. The source reading and the measurements are in [ADR 0001](docs/adr/0001-slurm-array-jobs.md).
 
 ## Use
 

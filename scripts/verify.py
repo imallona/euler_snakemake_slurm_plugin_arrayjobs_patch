@@ -43,17 +43,32 @@ def task_from_filename(record):
     return match.group(1) if match else ""
 
 
-def outermost_link(record):
+def wrapper_target(record):
+    """The tasks the job's wrapper was told to build, and where that was read.
+
+    The batch script is authoritative: srun launches its step under a separate
+    slurmstepd, so the wrapper is not in the probe's process ancestry. The
+    outermost ancestry link is the fallback for a record written before
+    scontrol was consulted, or outside Slurm.
+    """
+    script = record.get("batch_script") or {}
+    tasks = script.get("target_tasks") or []
+    if tasks:
+        return tasks, "batch_script"
+
     links = record.get("snakemake_links") or []
-    return max(links, key=lambda link: link["depth"]) if links else None
+    if links:
+        outer = max(links, key=lambda link: link["depth"])
+        if outer["target_tasks"]:
+            return outer["target_tasks"], "ancestry"
+    return [], ""
 
 
 def analyse(records):
     rows = []
     for record in records:
         slurm = record.get("slurm") or {}
-        outer = outermost_link(record)
-        outer_tasks = outer["target_tasks"] if outer else []
+        wrapper_tasks, source = wrapper_target(record)
         rows.append(
             {
                 "task": record["task"],
@@ -63,9 +78,9 @@ def analyse(records):
                 "job_id": slurm.get("SLURM_JOB_ID") or "",
                 "array_job_id": slurm.get("SLURM_ARRAY_JOB_ID") or "",
                 "array_task_id": slurm.get("SLURM_ARRAY_TASK_ID") or "",
-                "snakemake_depth": len(record.get("snakemake_links") or []),
-                "outer_target_tasks": ",".join(outer_tasks) or "",
-                "dispatch_ok": (not outer_tasks) or outer_tasks == [record["task"]],
+                "wrapper_tasks": ",".join(wrapper_tasks) or "",
+                "wrapper_source": source,
+                "dispatch_ok": (not wrapper_tasks) or wrapper_tasks == [record["task"]],
                 "tmpdir": slurm.get("TMPDIR") or "",
             }
         )
@@ -96,9 +111,8 @@ def verdict_lines(rows):
         )
     elif not arrayed:
         lines.append(
-            "No task saw SLURM_ARRAY_TASK_ID. Either array submission was off, or "
-            "the plugin never gathered enough ready jobs of the rule at one time "
-            "to form an array. Run with DEBUG=1 and look for the plugin's "
+            "No task saw SLURM_ARRAY_TASK_ID, so no array was formed. With "
+            "--slurm-array-jobs set, run with DEBUG=1 and read the plugin's "
             "'Array job collection incomplete' lines in the driver log."
         )
     elif len(arrayed) < total:
@@ -113,24 +127,32 @@ def verdict_lines(rows):
         lines.append("")
         lines.append(
             f"DISPATCH MISMATCH on {len(mismatched)} of {total} tasks. The "
-            "outermost snakemake process was told to build a different task's "
-            "output than the one that actually ran here. That outer process "
-            "checks its own target when the inner command returns, does not find "
-            "it, and raises MissingOutputException naming a task this job never "
-            "had. This is the array dispatch defect in "
-            "snakemake-executor-plugin-slurm 2.7.1 and 2.8.0."
+            "wrapper was told to build a different task's output than the one "
+            "that ran here. It checks its own target when the inner command "
+            "returns, does not find it, and raises MissingOutputException "
+            "naming a task this job never had. This is the array dispatch "
+            "defect in snakemake-executor-plugin-slurm 2.7.1 and 2.8.0."
         )
         for row in mismatched:
             lines.append(
                 f"  task {row['task']} (array task {row['array_task_id']}) ran under "
-                f"a wrapper targeting task {row['outer_target_tasks']}"
+                f"a wrapper targeting task {row['wrapper_tasks']}"
             )
     elif arrayed:
         lines.append("")
-        lines.append(
-            "Every array task ran under a wrapper targeting its own job. Array "
-            "dispatch is correct in this run."
-        )
+        if any(row["wrapper_source"] != "batch_script" for row in arrayed):
+            # srun hides the wrapper from the ancestry, so every task reads as
+            # correct whether it is or not.
+            lines.append(
+                "No task read its batch script, so the wrapper's target is "
+                "unknown and this run says nothing about the dispatch. Check "
+                "that scontrol is on PATH in the job."
+            )
+        else:
+            lines.append(
+                "Every array task ran under a wrapper targeting its own job. "
+                "Array dispatch is correct in this run."
+            )
 
     wrong_file = [row for row in rows if row["file_task"] and row["file_task"] != row["task"]]
     if wrong_file:
@@ -171,8 +193,8 @@ COLUMNS = (
     "array_job_id",
     "host",
     "seconds",
-    "snakemake_depth",
-    "outer_target_tasks",
+    "wrapper_tasks",
+    "wrapper_source",
     "dispatch_ok",
     "tmpdir",
 )
