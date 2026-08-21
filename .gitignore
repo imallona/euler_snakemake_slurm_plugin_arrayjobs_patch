@@ -1,0 +1,9 @@
+results/
+.snakemake/
+slurm/logs/*.out
+slurm/snakemake_logs/
+__pycache__/
+*.pyc
+*.orig
+.pytest_cache/
+.ruff_cache/

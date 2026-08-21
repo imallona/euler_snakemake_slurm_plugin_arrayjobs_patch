@@ -1,0 +1,62 @@
+# A workflow whose only product is evidence about how Slurm array jobs are
+# dispatched on Euler. Every probe job is independent, costs one core and a
+# short sleep, and writes down where it ran and which snakemake process chain
+# launched it. summarise then reads those records and states whether the
+# dispatch was correct.
+#
+# Run it through the Makefile, which sets outdir, n_tasks and sleep_seconds and
+# adds the mode specific flags. See README.md.
+
+from pathlib import Path
+
+configfile: "config/config.yaml"
+
+SCRIPTS = Path(workflow.basedir).parent / "scripts"
+OUTDIR = Path(config["outdir"])
+TASKS = [f"{i:03d}" for i in range(1, int(config["n_tasks"]) + 1)]
+
+
+wildcard_constraints:
+    task=r"\d+",
+
+
+rule all:
+    input:
+        OUTDIR / "summary.tsv",
+        OUTDIR / "verdict.txt",
+
+
+# The unit of the experiment. One core, no software deployment, no network, so
+# nothing but the scheduler and the executor plugin can make it fail.
+rule probe:
+    output:
+        OUTDIR / "probe" / "task_{task}.json",
+    params:
+        script=SCRIPTS / "probe.py",
+        sleep=config["sleep_seconds"],
+    threads: 1
+    resources:
+        runtime=10,
+        mem_mb_per_cpu=1000,
+    shell:
+        "python3 {params.script} --task {wildcards.task} "
+        "--sleep {params.sleep} --out {output}"
+
+
+# Reads every probe record at once, so it is a single job whatever the mode is,
+# and the plugin submits it as a plain job even with array submission on.
+rule summarise:
+    input:
+        expand(str(OUTDIR / "probe" / "task_{task}.json"), task=TASKS),
+    output:
+        summary=OUTDIR / "summary.tsv",
+        verdict=OUTDIR / "verdict.txt",
+    params:
+        script=SCRIPTS / "verify.py",
+    threads: 1
+    resources:
+        runtime=10,
+        mem_mb_per_cpu=1000,
+    shell:
+        "python3 {params.script} --probes {input} "
+        "--summary {output.summary} --verdict {output.verdict}"

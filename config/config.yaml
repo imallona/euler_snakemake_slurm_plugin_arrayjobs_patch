@@ -1,0 +1,14 @@
+# Defaults for the array job test workflow. The Makefile overrides all three
+# through --config, so a run never edits this file.
+
+# Number of independent probe jobs. Must be at least 2 for an array to be
+# eligible: the plugin submits a rule with a single pending job as a plain job.
+n_tasks: 12
+
+# Seconds each probe sleeps. Long enough that the tasks overlap in the queue,
+# short enough that a full comparison finishes inside one driver job.
+sleep_seconds: 20
+
+# Written to by the run. The Makefile puts each mode in its own directory so
+# plain, array and group results can be compared side by side.
+outdir: results/plain
