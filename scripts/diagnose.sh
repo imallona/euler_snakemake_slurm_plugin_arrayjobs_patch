@@ -12,6 +12,14 @@
 set -uo pipefail
 
 driver_log="${1:-$(ls -t slurm/logs/*.out 2>/dev/null | head -1)}"
+# A named log written by another node may not be visible yet. Listing the
+# directory drops the cached lookup that says it is absent.
+for _ in 1 2 3; do
+    [ -n "$driver_log" ] && [ -f "$driver_log" ] && break
+    ls slurm/logs > /dev/null 2>&1
+    sleep 2
+    driver_log="${1:-$(ls -t slurm/logs/*.out 2>/dev/null | head -1)}"
+done
 if [ -z "$driver_log" ] || [ ! -f "$driver_log" ]; then
     echo "No driver log found. Pass one as the first argument." >&2
     exit 1

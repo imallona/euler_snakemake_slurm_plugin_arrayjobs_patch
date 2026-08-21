@@ -85,7 +85,7 @@ group:
 
 # Reads whatever records exist, so it is useful precisely when the run failed.
 verify:
-	python3 scripts/verify.py --probes $(OUTDIR)/probe \
+	python3 scripts/verify.py --probes $(OUTDIR)/probe --expect $(N) \
 	  --summary $(OUTDIR)/summary.tsv --verdict $(OUTDIR)/verdict.txt
 
 diagnose:

@@ -114,11 +114,20 @@ def analyse(records):
     return rows
 
 
-def verdict_lines(rows):
+def verdict_lines(rows, expected=0):
     lines = []
     total = len(rows)
     if total == 0:
         return ["No probe records found. The probe jobs never started."]
+
+    if expected and total < expected:
+        lines.append(
+            f"MISSING RECORDS: {expected - total} of {expected}. A job that "
+            "wrote nothing and a file not yet visible on the shared filesystem "
+            "look the same here, so check the driver log for "
+            "MissingOutputException before reading this as lost work."
+        )
+        lines.append("")
 
     arrayed = [row for row in rows if row["array_task_id"]]
     allocations = len({row["job_id"] for row in rows if row["job_id"]})
@@ -252,6 +261,13 @@ def main():
     parser.add_argument("--summary", type=Path)
     parser.add_argument("--verdict", type=Path)
     parser.add_argument(
+        "--expect",
+        type=int,
+        default=0,
+        help="how many records there should be; a shortfall is reported rather "
+        "than silently shrinking the verdict",
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help="exit non-zero when a mismatch is found; off by default so the "
@@ -260,7 +276,7 @@ def main():
     args = parser.parse_args()
 
     rows = analyse(collect(args.probes))
-    lines = verdict_lines(rows)
+    lines = verdict_lines(rows, expected=args.expect)
 
     table = ["\t".join(COLUMNS)]
     table.extend("\t".join(str(row[column]) for column in COLUMNS) for row in rows)

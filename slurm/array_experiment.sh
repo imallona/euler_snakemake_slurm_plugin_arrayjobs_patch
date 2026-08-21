@@ -31,6 +31,15 @@ echo "finished with status $status, $(date -Is)"
 
 echo
 echo "=================== the records ==================="
+# The probe files are written by other nodes, and a NetApp lookup can lag
+# behind the job that wrote one. Waiting first keeps a slow file from being
+# read as a task that produced nothing, which is what this run measures.
+deadline=$((SECONDS + 180))
+while [ "$(find "$outdir/probe" -name '*.json' 2>/dev/null | wc -l)" -lt "$N" ] \
+      && [ "$SECONDS" -lt "$deadline" ]; do
+    sleep 10
+done
+echo "$(find "$outdir/probe" -name '*.json' 2>/dev/null | wc -l) of $N records visible"
 make verify MODE=array RESULTS="$RESULTS" N="$N" || true
 
 echo

@@ -337,3 +337,16 @@ def test_verify_decodes_a_record_probe_could_not(tmp_path):
     # Task 7's payload entry names 009, so the decode has to catch it.
     assert by_task["007"]["wrapper_tasks"] == "009"
     assert by_task["007"]["dispatch_ok"] is False
+
+
+def test_missing_records_are_reported(tmp_path):
+    """A lagging file and a task that wrote nothing look the same, so say so."""
+    write_record(tmp_path, "001", 1, outer_task="001")
+    rows = verify.analyse(verify.collect([tmp_path]))
+
+    text = "\n".join(verify.verdict_lines(rows, expected=60))
+    assert "MISSING RECORDS: 59 of 60" in text
+    assert "MissingOutputException" in text
+
+    assert "MISSING RECORDS" not in "\n".join(verify.verdict_lines(rows, expected=1))
+    assert "MISSING RECORDS" not in "\n".join(verify.verdict_lines(rows))
