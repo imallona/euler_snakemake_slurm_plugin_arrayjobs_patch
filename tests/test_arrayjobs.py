@@ -6,6 +6,7 @@ anything.
 """
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -244,3 +245,22 @@ def test_array_tasks_are_still_checked(tmp_path):
     rows = verify.analyse(verify.collect([tmp_path]))
     assert {row["wrapper_source"] for row in rows} == {"batch_script"}
     assert sum(not row["dispatch_ok"] for row in rows) == 2
+
+
+def test_replace_atomically_breaks_hardlinks(tmp_path):
+    """conda hardlinks site-packages into its package cache.
+
+    An in-place write reaches the cache, and every environment later built
+    from it. A rename gives the file its own inode instead.
+    """
+    installed = tmp_path / "__init__.py"
+    installed.write_text("original\n", encoding="utf-8")
+    cached = tmp_path / "cache.py"
+    os.link(installed, cached)
+    assert installed.stat().st_nlink == 2
+
+    patch_slurm_plugin.replace_atomically(installed, "patched\n")
+
+    assert installed.read_text() == "patched\n"
+    assert cached.read_text() == "original\n"
+    assert installed.stat().st_nlink == 1

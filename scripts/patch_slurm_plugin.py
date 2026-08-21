@@ -134,6 +134,10 @@ def replace_atomically(path, text):
     rewrite leaves a window in which a starting job sees a partial file and
     dies with an ImportError. Writing a sibling and renaming has no such
     window, since rename within a directory is atomic.
+
+    The rename also gives the file a new inode. conda hardlinks site-packages
+    into its package cache, so an in-place write reaches the cache and every
+    other environment built from it.
     """
     temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     temporary.write_text(text, encoding="utf-8")
@@ -143,10 +147,19 @@ def replace_atomically(path, text):
 
 def report_status(path, version):
     text = path.read_text(encoding="utf-8")
+    links = path.stat().st_nlink
     print(f"plugin   {path}")
     print(f"version  {version}")
     print(f"patched  {'yes' if SENTINEL in text else 'no'}")
     print(f"backup   {'present' if backup_path(path).exists() else 'absent'}")
+    print(f"links    {links}")
+    if links > 1:
+        # Applying breaks the link, so this only shows up on a file patched by
+        # an earlier version of this script, or on a pristine install.
+        print(
+            "         shared with conda's package cache. If the file is also "
+            "patched, so is the cache."
+        )
 
 
 def apply_patch(path, version):

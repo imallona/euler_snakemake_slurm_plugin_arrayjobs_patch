@@ -77,6 +77,8 @@ A group job's batch script names one member and snakemake rebuilds the rest from
 ## Consequences
 
 - The patch edits a file inside the conda environment at `/cluster/project/platt/$USER/envs/snakemake`. Any reinstall or update of the plugin discards it silently, so `make versions` reports the patch state and the drivers print it before doing anything.
+- Snakemake imports the Slurm executor plugin at startup whatever executor is selected, `--executor local` included, so every job of every workflow in the environment reads the patched file. The patch changes only `run_array_jobs`, which a workflow setting no `--slurm-array` flag never calls, and the file is written by rename so no job can see it half written.
+- conda hardlinks site-packages into its package cache. Writing in place reaches the cache and every environment later built from it. Job 11390936's environment was patched that way on 2026-08-21 and the cache was restored by renaming a pristine copy over it; `--status` now reports the link count.
 - `retries` is 0 in `profiles/euler/config.yaml`, unlike the production profiles. A retry resubmits the failed tasks, and once one is left the plugin sends it as a plain job, which succeeds.
 - `jobs` in the profile has to be at least `n_tasks`. The plugin forms an array only from jobs of one rule that are ready at the same moment, so a lower `--jobs` produces a run with no array in it and no error explaining why.
 - `--slurm-array-limit` bounds the chunk. It defaults to 1000 in the plugin and to 200 here, because the encoded commands travel inside the batch script and Slurm caps that at a few MB.
