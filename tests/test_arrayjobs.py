@@ -403,3 +403,11 @@ def test_shipped_patch_matches_the_script(tmp_path):
     by_script += patch_slurm_plugin.HELPER
 
     assert target.read_text(encoding="utf-8") == by_script
+
+
+def test_status_recognises_the_former_sentinel():
+    """An environment patched before the rename is still patched."""
+    for marker in (patch_slurm_plugin.SENTINEL, *patch_slurm_plugin.FORMER_SENTINELS):
+        assert patch_slurm_plugin.is_patched(f"import os\n{marker}\ndef f(): pass\n")
+    assert not patch_slurm_plugin.is_patched("import os\ndef f(): pass\n")
+    assert "platt" not in patch_slurm_plugin.SENTINEL

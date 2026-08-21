@@ -28,7 +28,10 @@ import shutil
 from pathlib import Path
 
 SUPPORTED_VERSIONS = ("2.7.1", "2.8.0")
-SENTINEL = "# platt_arrayjobs: per task array dispatch"
+SENTINEL = "# patched: per task array dispatch"
+# An environment patched before the marker was renamed still carries the old
+# one. --status has to see it, or it reports a patched file as pristine.
+FORMER_SENTINELS = ("# platt_arrayjobs: per task array dispatch",)
 
 # The payload must carry the chunk's first task too, since the batch script now
 # looks up every task including that one.
@@ -145,12 +148,16 @@ def replace_atomically(path, text):
     os.replace(temporary, path)
 
 
+def is_patched(text):
+    return SENTINEL in text or any(old in text for old in FORMER_SENTINELS)
+
+
 def report_status(path, version):
     text = path.read_text(encoding="utf-8")
     links = path.stat().st_nlink
     print(f"plugin   {path}")
     print(f"version  {version}")
-    print(f"patched  {'yes' if SENTINEL in text else 'no'}")
+    print(f"patched  {'yes' if is_patched(text) else 'no'}")
     print(f"backup   {'present' if backup_path(path).exists() else 'absent'}")
     print(f"links    {links}")
     if links > 1:
@@ -164,7 +171,7 @@ def report_status(path, version):
 
 def apply_patch(path, version):
     text = path.read_text(encoding="utf-8")
-    if SENTINEL in text:
+    if is_patched(text):
         print("Already patched, nothing to do.")
         return
     if version not in SUPPORTED_VERSIONS:

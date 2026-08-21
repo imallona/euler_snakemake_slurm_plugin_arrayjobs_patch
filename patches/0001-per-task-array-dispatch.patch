@@ -35,7 +35,7 @@
 -                        )
 -                        call_with_array += " /dev/stdin"
 -                        subprocess_stdin = sbatch_script
-+                    # platt_arrayjobs: per task array dispatch
++                    # patched: per task array dispatch
 +                    # The batch script picks the command for its own task, so
 +                    # no snakemake process in the task carries another job's
 +                    # target. use_script_submission and exec_job are left in
@@ -54,7 +54,7 @@
              return ""
 +
 +
-+# platt_arrayjobs: per task array dispatch
++# patched: per task array dispatch
 +def _array_dispatch_script(python_executable: str, payload: str) -> str:
 +    """Batch script running the command that belongs to this array task.
 +

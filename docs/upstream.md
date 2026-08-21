@@ -41,7 +41,7 @@ Short, evenly sized jobs stay inside that window. Long or unevenly sized ones do
 
 ## Reproduction
 
-https://github.com/imallona/platt_arrayjobs submits 60 one core jobs as an array and records, per task, the `--target-jobs` its batch script carries:
+https://github.com/imallona/euler_snakemake_slurm_plugin_arrayjobs_patch submits 60 one core jobs as an array and records, per task, the `--target-jobs` its batch script carries:
 
 | | unpatched | patched |
 | --- | --- | --- |

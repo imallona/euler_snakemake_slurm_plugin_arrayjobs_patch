@@ -1,4 +1,4 @@
-# platt_arrayjobs
+# euler_snakemake_slurm_plugin_arrayjobs_patch
 
 A reproducer and a patch for a Slurm array job defect, on ETH Euler.
 
