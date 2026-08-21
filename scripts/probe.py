@@ -38,6 +38,10 @@ SLURM_VARS = (
 
 MAX_ANCESTRY_DEPTH = 16
 
+# Every task of an array asks the controller at the same moment.
+SCONTROL_ATTEMPTS = 4
+SCONTROL_RETRY_SECONDS = 3
+
 
 def read_argv(pid):
     with open(f"/proc/{pid}/cmdline", "rb") as handle:
@@ -93,25 +97,36 @@ def tasks_in_specs(specs):
 
 
 def batch_script():
-    """The batch script of this job, as the controller holds it.
+    """The batch script of this job, as the controller holds it, and any error.
 
     For an array task this is the chunk's script, shared by every task, so its
-    --target-jobs is what the wrapper was told to build. Returns an empty
-    string outside Slurm, or when the controller has already forgotten the job.
+    --target-jobs is what the wrapper was told to build.
+
+    The controller answers over RPC and refuses under load, so the error is
+    recorded rather than swallowed: on 2026-08-21 nine of twelve probes asking
+    at once came back empty, and an empty script is indistinguishable from a
+    correct dispatch.
     """
     job_id = os.environ.get("SLURM_JOB_ID")
     if not job_id:
-        return ""
-    try:
-        result = subprocess.run(
-            ["scontrol", "write", "batch_script", job_id, "-"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    return result.stdout if result.returncode == 0 else ""
+        return "", "not a Slurm job"
+    for attempt in range(SCONTROL_ATTEMPTS):
+        try:
+            result = subprocess.run(
+                ["scontrol", "write", "batch_script", job_id, "-"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except FileNotFoundError:
+            return "", "scontrol not on PATH"
+        except (OSError, subprocess.SubprocessError) as error:
+            return "", f"{type(error).__name__}: {error}"
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout, ""
+        if attempt + 1 < SCONTROL_ATTEMPTS:
+            time.sleep(SCONTROL_RETRY_SECONDS * (attempt + 1))
+    return "", (result.stderr or "").strip() or f"scontrol exited {result.returncode}"
 
 
 def specs_in_text(text):
@@ -153,7 +168,7 @@ def main():
             }
         )
 
-    script = batch_script()
+    script, script_error = batch_script()
     script_specs = specs_in_text(script)
 
     if args.sleep > 0:
@@ -171,6 +186,7 @@ def main():
         "batch_script": {
             "target_job_specs": script_specs,
             "target_tasks": tasks_in_specs(script_specs),
+            "error": script_error,
             "text": script,
         },
         "ancestry": [

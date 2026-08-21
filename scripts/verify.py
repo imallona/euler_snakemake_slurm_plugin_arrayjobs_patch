@@ -65,17 +65,30 @@ def wrapper_target(record):
 
 
 def analyse(records):
+    # Several records sharing one Slurm job id means a group job. Its batch
+    # script names one member and snakemake rebuilds the rest from
+    # --local-groupid, so the wrapper naming another member is expected and the
+    # dispatch check does not apply. An array gives each task its own job id.
+    shared = Counter(
+        (record.get("slurm") or {}).get("SLURM_JOB_ID")
+        for record in records
+        if (record.get("slurm") or {}).get("SLURM_JOB_ID")
+    )
+
     rows = []
     for record in records:
         slurm = record.get("slurm") or {}
         wrapper_tasks, source = wrapper_target(record)
+        job_id = slurm.get("SLURM_JOB_ID") or ""
+        if job_id and shared[job_id] > 1 and not slurm.get("SLURM_ARRAY_TASK_ID"):
+            wrapper_tasks, source = [], "group"
         rows.append(
             {
                 "task": record["task"],
                 "file_task": task_from_filename(record),
                 "host": record.get("host", ""),
                 "seconds": round(record.get("finished", 0) - record.get("started", 0), 1),
-                "job_id": slurm.get("SLURM_JOB_ID") or "",
+                "job_id": job_id,
                 "array_job_id": slurm.get("SLURM_ARRAY_JOB_ID") or "",
                 "array_task_id": slurm.get("SLURM_ARRAY_TASK_ID") or "",
                 "wrapper_tasks": ",".join(wrapper_tasks) or "",
@@ -171,6 +184,15 @@ def verdict_lines(rows):
     if duplicated:
         lines.append("")
         lines.append("DUPLICATE array task ids: " + ", ".join(sorted(duplicated)))
+
+    grouped = [row for row in rows if row["wrapper_source"] == "group"]
+    if grouped:
+        lines.append("")
+        lines.append(
+            f"{len(grouped)} of {total} tasks shared an allocation with another "
+            "task, so they ran as group jobs. A group's batch script names one "
+            "member, and the dispatch check does not apply to them."
+        )
 
     if submissions:
         per_submission = defaultdict(int)

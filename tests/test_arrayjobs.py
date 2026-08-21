@@ -211,3 +211,36 @@ def test_ancestry_only_array_run_is_inconclusive(tmp_path):
     assert all(row["wrapper_source"] == "ancestry" for row in rows)
     assert "says nothing about the dispatch" in text
     assert "dispatch is correct" not in text
+
+
+def test_group_members_are_not_flagged(tmp_path):
+    """Four tasks in one allocation is a group job, not a mismatched array.
+
+    A group's batch script names one member; snakemake rebuilds the rest from
+    --local-groupid and checks all their outputs.
+    """
+    for index, task in enumerate(["001", "007", "011", "012"], start=1):
+        path = write_record(tmp_path, task, index, outer_task="007")
+        record = json.loads(path.read_text())
+        record["slurm"]["SLURM_JOB_ID"] = "11392044"
+        record["slurm"]["SLURM_ARRAY_TASK_ID"] = None
+        record["slurm"]["SLURM_ARRAY_JOB_ID"] = None
+        path.write_text(json.dumps(record))
+
+    rows = verify.analyse(verify.collect([tmp_path]))
+    text = "\n".join(verify.verdict_lines(rows))
+
+    assert all(row["dispatch_ok"] for row in rows)
+    assert all(row["wrapper_source"] == "group" for row in rows)
+    assert "MISMATCH" not in text
+    assert "4 of 4 tasks shared an allocation" in text
+
+
+def test_array_tasks_are_still_checked(tmp_path):
+    """Array tasks each get their own job id, so the group rule must not hide them."""
+    for index, task in enumerate(["001", "002", "003"], start=1):
+        write_record(tmp_path, task, index, outer_task="001")
+
+    rows = verify.analyse(verify.collect([tmp_path]))
+    assert {row["wrapper_source"] for row in rows} == {"batch_script"}
+    assert sum(not row["dispatch_ok"] for row in rows) == 2

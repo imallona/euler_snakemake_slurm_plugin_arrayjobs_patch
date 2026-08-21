@@ -15,8 +15,10 @@ In plugin 2.7.1 and 2.8.0 every task of an array chunk runs the wrapped command 
 Activate the snakemake environment on a login node.
 
 ```
-sbatch slurm/00_probe.sh      # versions, cluster limits, plans; submits nothing
-sbatch slurm/01_compare.sh    # the same jobs plain, as an array, and grouped
+sbatch slurm/00_probe.sh          # versions, cluster limits, plans; submits nothing
+sbatch slurm/01_compare.sh        # 12 jobs plain, as an array, and grouped
+make patch                        # on the login node
+sbatch slurm/02_patched_array.sh  # 60 array tasks, more than start at once
 ```
 
 Each probe job records its `SLURM_*` variables and the command line of every process above it, from `/proc`. `scripts/verify.py` writes `results/<mode>/verdict.txt`, naming the task each mismatched wrapper targeted. It also reads a run that failed part way. The `group` mode uses `--groups`, which bypasses array submission and works unpatched.
@@ -30,6 +32,8 @@ make patch-status
 make patch
 make unpatch
 ```
+
+It edits the environment every snakemake job of the account uses, so apply it from a login node, not a queued job.
 
 ## License
 

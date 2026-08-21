@@ -76,7 +76,7 @@ bash scripts/diagnose.sh || true
 echo
 echo "=================== verdicts ==================="
 for mode in $MODES; do
-    verdict="results/$mode/verdict.txt"
+    verdict="$(make -s print-outdir MODE="$mode" ${make_args[@]+"${make_args[@]}"})/verdict.txt"
     echo "------------------- $mode"
     [ -f "$verdict" ] && cat "$verdict" || echo "no verdict written"
     echo

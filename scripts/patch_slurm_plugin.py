@@ -23,6 +23,7 @@ They remain under their original terms.
 import argparse
 import importlib.metadata
 import importlib.util
+import os
 import shutil
 from pathlib import Path
 
@@ -125,6 +126,21 @@ def backup_path(path):
     return path.with_name(path.name + ".orig")
 
 
+def replace_atomically(path, text):
+    """Put text at path without the file ever being visible half written.
+
+    Snakemake imports this module at startup whatever executor is selected, so
+    every job of every workflow in the environment reads it. A truncate and
+    rewrite leaves a window in which a starting job sees a partial file and
+    dies with an ImportError. Writing a sibling and renaming has no such
+    window, since rename within a directory is atomic.
+    """
+    temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    temporary.write_text(text, encoding="utf-8")
+    shutil.copystat(path, temporary)
+    os.replace(temporary, path)
+
+
 def report_status(path, version):
     text = path.read_text(encoding="utf-8")
     print(f"plugin   {path}")
@@ -155,7 +171,7 @@ def apply_patch(path, version):
         shutil.copy2(path, backup)
     text = text.replace(OLD_PAYLOAD_RANGE, NEW_PAYLOAD_RANGE)
     text = text.replace(OLD_SUBMISSION_BRANCH, NEW_SUBMISSION_BRANCH)
-    path.write_text(text + HELPER, encoding="utf-8")
+    replace_atomically(path, text + HELPER)
     print(f"Patched {path}, original kept at {backup}.")
 
 
@@ -163,7 +179,7 @@ def revert_patch(path):
     backup = backup_path(path)
     if not backup.exists():
         raise SystemExit(f"No backup at {backup}, nothing to restore.")
-    shutil.copy2(backup, path)
+    replace_atomically(path, backup.read_text(encoding="utf-8"))
     print(f"Restored {path} from {backup}.")
 
 

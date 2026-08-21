@@ -8,6 +8,7 @@
 #   make group                   several jobs of a rule per Slurm job
 #   make verify MODE=array       read the records of a finished or failed run
 #   make diagnose                sacct and log evidence for the last driver job
+#   make patch                   per task array dispatch, in the active env
 #
 # MODE names both the flags and the output directory, so the three runs never
 # overwrite each other and can be compared afterwards.
@@ -52,7 +53,7 @@ endif
 
 snakemake := snakemake $(base_args) $(mode_args) $(EXTRA)
 
-.PHONY: help versions dry run plain array group verify diagnose \
+.PHONY: help versions dry run plain array group verify diagnose print-outdir \
         patch-status patch unpatch clean test
 
 help:
@@ -89,6 +90,10 @@ verify:
 
 diagnose:
 	bash scripts/diagnose.sh
+
+# So the drivers do not rebuild the path this file already owns.
+print-outdir:
+	@echo $(OUTDIR)
 
 patch-status:
 	python3 scripts/patch_slurm_plugin.py --status
