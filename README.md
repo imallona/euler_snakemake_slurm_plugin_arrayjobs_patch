@@ -43,6 +43,14 @@ It edits the environment every snakemake job of the account uses. The write is a
 
 [docs/upstream.md](docs/upstream.md) is the report, and `patches/0001-per-task-array-dispatch.patch` the same change as a diff against 2.8.0, applied with `patch -p1` from a checkout root. A test asserts the diff and `scripts/patch_slurm_plugin.py` produce the same file.
 
+The fork at https://github.com/imallona/snakemake-executor-plugin-slurm carries it on `fix-array-task-dispatch`, with the upstream tests updated and one that fails without the change. Installing from there replaces the in place patch:
+
+```
+pip install "snakemake-executor-plugin-slurm @ git+https://github.com/imallona/snakemake-executor-plugin-slurm@fix-array-task-dispatch"
+```
+
+A pinned environment is the reason to prefer it: `scripts/patch_slurm_plugin.py` edits a file conda can overwrite without warning, and an install cannot be undone by a package update going unnoticed.
+
 ## License
 
 MIT, see [LICENSE](LICENSE). The plugin excerpts in `scripts/patch_slurm_plugin.py` stay under their own MIT license.

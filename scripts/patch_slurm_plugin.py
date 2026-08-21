@@ -33,16 +33,20 @@ SENTINEL = "# patched: per task array dispatch"
 # one. --status has to see it, or it reports a patched file as pristine.
 FORMER_SENTINELS = ("# platt_arrayjobs: per task array dispatch",)
 
-# The payload must carry the chunk's first task too, since the batch script now
-# looks up every task including that one.
-OLD_PAYLOAD_RANGE = """                sub_array_execs = {
+# The payload carries every task of the chunk, the first one included, since
+# the batch script looks its own task up in it. exec_job goes with the wrapper
+# it fed, and the comprehension then fits ruff format's one line.
+OLD_PAYLOAD_RANGE = """                # The first task of each chunk runs via the plain base command.
+                # Remaining tasks are dispatched from --slurm-jobstep-array-execs.
+                exec_job = self.format_job_exec(jobs[start_index - 1])
+                sub_array_execs = {
                     str(i): array_execs[i]
                     for i in range(start_index + 1, end_index + 1)
                 }
 """
-NEW_PAYLOAD_RANGE = """                sub_array_execs = {
-                    str(i): array_execs[i]
-                    for i in range(start_index, end_index + 1)
+NEW_PAYLOAD_RANGE = """                # Every task of the chunk, so each can look up its own command.
+                sub_array_execs = {
+                    str(i): array_execs[i] for i in range(start_index, end_index + 1)
                 }
 """
 
@@ -75,8 +79,8 @@ OLD_SUBMISSION_BRANCH = '''                    if not use_script_submission:
 NEW_SUBMISSION_BRANCH = f'''                    {SENTINEL}
                     # The batch script picks the command for its own task, so
                     # no snakemake process in the task carries another job's
-                    # target. use_script_submission and exec_job are left in
-                    # place but no longer decide anything here.
+                    # target. use_script_submission no longer decides anything
+                    # here; the payload never reaches the command line.
                     subprocess_stdin = _array_dispatch_script(
                         self.get_python_executable(), array_execs_payload
                     )

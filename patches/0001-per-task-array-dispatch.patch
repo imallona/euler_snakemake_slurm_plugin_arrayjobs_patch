@@ -1,15 +1,21 @@
 --- a/snakemake_executor_plugin_slurm/__init__.py
 +++ b/snakemake_executor_plugin_slurm/__init__.py
-@@ -914,7 +914,7 @@
-                 exec_job = self.format_job_exec(jobs[start_index - 1])
+@@ -909,12 +909,9 @@
+             array_limit = min(self.max_array_size, len(jobs))
+             for start_index in range(1, len(jobs) + 1, array_limit):
+                 end_index = min(start_index + array_limit - 1, len(jobs))
+-                # The first task of each chunk runs via the plain base command.
+-                # Remaining tasks are dispatched from --slurm-jobstep-array-execs.
+-                exec_job = self.format_job_exec(jobs[start_index - 1])
++                # Every task of the chunk, so each can look up its own command.
                  sub_array_execs = {
-                     str(i): array_execs[i]
+-                    str(i): array_execs[i]
 -                    for i in range(start_index + 1, end_index + 1)
-+                    for i in range(start_index, end_index + 1)
++                    str(i): array_execs[i] for i in range(start_index, end_index + 1)
                  }
                  array_execs_payload = base64.b64encode(
                      json.dumps(sub_array_execs).encode("utf-8")
-@@ -933,28 +933,16 @@
+@@ -933,28 +930,16 @@
                  while True:
                      call_with_array = call + f" --array={start_index}-{end_index}"
  
@@ -38,8 +44,8 @@
 +                    # patched: per task array dispatch
 +                    # The batch script picks the command for its own task, so
 +                    # no snakemake process in the task carries another job's
-+                    # target. use_script_submission and exec_job are left in
-+                    # place but no longer decide anything here.
++                    # target. use_script_submission no longer decides anything
++                    # here; the payload never reaches the command line.
 +                    subprocess_stdin = _array_dispatch_script(
 +                        self.get_python_executable(), array_execs_payload
 +                    )
@@ -48,7 +54,7 @@
  
                      self.logger.debug(
                          f"Submitting array job with sbatch call: {call_with_array}"
-@@ -1729,3 +1717,31 @@
+@@ -1729,3 +1714,31 @@
              return f" -p {shlex.quote(str(partition))}"
          else:
              return ""
