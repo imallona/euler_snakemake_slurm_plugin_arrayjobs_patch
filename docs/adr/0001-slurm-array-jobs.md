@@ -6,7 +6,7 @@ Applies to: snakemake 9.25.1, snakemake-executor-plugin-slurm 2.7.1 and 2.8.0, s
 
 ## Context
 
-`sacct` for the twelve hours to 2026-08-21 shows 1546 jobs under a single snakemake run uuid, each asking for one core and finishing in nineteen to sixty-two seconds. Each is an sbatch call, a queue entry, a node allocation and a snakemake process chain.
+`sacct` for the twelve hours to 2026-08-21 shows 1546 jobs under one snakemake run uuid, each one core, 19 to 62 seconds. Their `Comment` names the rule: `eval_fuzzy_metrics` 760 and `run_gffcompare` 680. Each job is an sbatch call, a queue entry, a node allocation and a snakemake process chain.
 
 Array submission has been off since 2026-08-06, recorded in `platt_prime_editing_total_rnaseq/docs/adr/0001-euler-software-deployment.md` as "every array task is launched with the first task's command".
 
@@ -45,28 +45,27 @@ elif self.job_array_task and self.workflow.executor_settings.array_execs:
 
 For array task k the inner command builds job k, and job k's output appears. The wrapper above it was never told about job k, so what happens next depends on the first job's output rather than on k's.
 
-Whether that fails is a race, measured on Euler on 2026-08-21 and not settled by reading the source. Two outcomes:
+`--force` is in the spawned job's arguments, so a wrapper whose target already exists rebuilds it. The task reaches the jobstep executor either way, the task's own command is substituted, and the task's own output is written. The wrapper then checks the first job's output.
 
-- Every task starts at once. Each runs its own decoded command, the array's minimum task is the one that builds the first job, and by the time the others postprocess they find its output present. All tasks exit 0 and every output is written. Job 11391488 did exactly this.
-- A task starts after the first job's output already exists. Its wrapper builds a DAG for a job with nothing to do, exits without running the inner command, and reports success. That task's own output is never written, and the driver raises `MissingOutputException` for it. This is the error seen in `star_pass1` and `fastqc` on 2026-08-06, where 54 libraries did not fit in the share at once.
+`latency-wait` is 60 seconds here, and it bounds that check. The run fails when the task holding the first job has not finished within 60 seconds of another task checking for it.
 
-The first outcome is not the defect being absent. The wrapper still checks the wrong job in every task, so a run passes only while the timing holds, and the same array on a busier cluster does not.
+Job 11399743, 60 probes of 20 seconds: 50 tasks started at 13:06:37 and 10 at 13:07:31. All 60 outputs written, driver exit 0, 59 of 60 wrappers targeting `probe:task=006`. `star_pass1` and `fastqc` over 54 libraries of hours failed on 2026-08-06 with `MissingOutputException` naming other samples.
 
 Diffing 2.7.1 against 2.8.0 shows this region unchanged. 2.8.0 adds `disable_memory_fudge`, `no_requeue`, and metadata emission before submission; jobstep 0.6.1 adds GPU and node settings and strips inherited `SLURM_*` variables before the nested `srun`.
 
 ## Decision
 
-**A reproducer.** `workflow/Snakefile` runs one core and a sleep per task and records the `--target-jobs` its batch script carries, so a mismatch with the task's own wildcard is a fact in a file rather than an inference from an exception. `scripts/verify.py` reads the records, including those of a run that failed part way.
+**A reproducer.** `workflow/Snakefile` runs one core and a sleep per task and records the `--target-jobs` its batch script carries, read with `scontrol write batch_script`. Not the process ancestry: `srun` launches its step under a separate `slurmstepd`, so walking `/proc` stops one snakemake short of the wrapper. Job 11390936 reported "array dispatch is correct" for an array whose wrapper targeted `probe:task=004` in all twelve tasks.
 
-The batch script comes from `scontrol write batch_script`, not from the process ancestry. `srun` launches its step under a separate `slurmstepd`, so walking `/proc` from inside the rule's shell stops one snakemake short of the wrapper and every task looks correct. The first cluster run, job 11390936, reported "array dispatch is correct" for an array whose wrapper targeted `probe:task=004` in all twelve tasks.
+A patched script holds no readable target, so the probe and `verify.py` decode the payload instead.
 
-**A comparison.** `slurm/` is a sequence, one submission per step: 12 jobs three ways, 60 array tasks unpatched, patch, the same 60 patched, unpatch. 02 and 04 share `array_experiment.sh` and each refuses if the plugin is in the wrong state, so a log says which side of the patch it came from.
+**A comparison.** `slurm/` is a sequence, one submission per step: 12 jobs three ways, 60 array tasks unpatched, patch, the same 60 patched, unpatch. 02 and 04 share `array_experiment.sh` and refuse if the plugin is in the wrong state.
 
-The three ways are `plain`, one sbatch per job; `array`; and `group`, using `--groups` and `--group-components`. The plugin excludes group jobs from array submission and sends them through the ordinary path, so they work unpatched. At four jobs per group, 1546 submissions become 387.
+The three ways are `plain`, one sbatch per job; `array`; and `group`, using `--groups` and `--group-components`. The plugin sends group jobs through the ordinary path, so they work unpatched. At four jobs per group, 1546 submissions become 387.
 
-A group job's batch script names one member and snakemake rebuilds the rest from `--local-groupid`, so its wrapper legitimately targets another task. `verify.py` recognises a group by several records sharing one `SLURM_JOB_ID`, which an array never does, and skips the dispatch check for them. Without that it reported a mismatch on the three group members that managed to read their script.
+A group's batch script names one member and snakemake rebuilds the rest from `--local-groupid`, so its wrapper targets another task legitimately. `verify.py` recognises a group by several records sharing one `SLURM_JOB_ID`, which an array never does.
 
-**A patch, opt in.** `scripts/patch_slurm_plugin.py` replaces the wrapper with a batch script that decodes the command for its own `$SLURM_ARRAY_TASK_ID` and runs it. The probe decodes the same payload, since a patched script holds no readable target. The task then holds a single snakemake process carrying its own target, and the jobstep executor's non-array path puts it under `srun`. The payload the plugin already builds is what gets decoded; the chunk's first task is added to it. The patch checks the plugin version, refuses to edit source it does not recognise, keeps the original as `__init__.py.orig`, and reverts.
+**A patch, opt in.** `scripts/patch_slurm_plugin.py` replaces the wrapper with a batch script that decodes the command for its own `$SLURM_ARRAY_TASK_ID`. The task then holds one snakemake process carrying its own target. It checks the plugin version, keeps `__init__.py.orig`, and reverts. `patches/0001-per-task-array-dispatch.patch` is the same change as a diff, and `docs/upstream.md` the report.
 
 ## Alternatives
 
@@ -78,22 +77,33 @@ A group job's batch script names one member and snakemake rebuilds the rest from
 
 ## Consequences
 
-- The patch edits a file inside the conda environment at `/cluster/project/platt/$USER/envs/snakemake`. Any reinstall or update of the plugin discards it silently, so `make versions` reports the patch state and the drivers print it before doing anything.
-- Snakemake imports the Slurm executor plugin at startup whatever executor is selected, `--executor local` included, so every job of every workflow in the environment reads the patched file. The patch changes only `run_array_jobs`, which a workflow setting no `--slurm-array` flag never calls, and the file is written by rename so no job can see it half written.
-- conda hardlinks site-packages into its package cache. Writing in place reaches the cache and every environment later built from it. Job 11390936's environment was patched that way on 2026-08-21 and the cache was restored by renaming a pristine copy over it; `--status` now reports the link count.
-- `retries` is 0 in `profiles/euler/config.yaml`, unlike the production profiles. A retry resubmits the failed tasks, and once one is left the plugin sends it as a plain job, which succeeds.
-- `jobs` in the profile has to be at least `n_tasks`. The plugin forms an array only from jobs of one rule that are ready at the same moment, so a lower `--jobs` produces a run with no array in it and no error explaining why.
-- `--slurm-array-limit` bounds the chunk. It defaults to 1000 in the plugin and to 200 here, because the encoded commands travel inside the batch script and Slurm caps that at a few MB.
+- The patch edits a file in the conda environment. A reinstall discards it, so `make versions` reports the patch state and the drivers print it before running.
+- Snakemake imports the Slurm plugin at startup under every executor, `--executor local` included, so every job in the environment reads the patched file. The patch changes only `run_array_jobs`, and the write is a rename.
+- conda hardlinks site-packages into its package cache, so an in-place write reaches the cache. `--status` reports the link count.
+- `retries` is 0 in `profiles/euler/config.yaml`. A retry resubmits the failed tasks, and the plugin sends the last one as a plain job, which succeeds.
+- `jobs` in the profile has to be at least `n_tasks`. An array is formed only from jobs of one rule ready at the same moment; a lower `--jobs` gives a run with no array and no error saying why.
+- `--slurm-array-limit` bounds the chunk, 1000 in the plugin and 200 here. The encoded commands travel inside the batch script, which Slurm caps at a few MB.
 
 ## On the cluster
 
-- eu-login-44, 2026-08-21: `MaxArraySize = 15000`, `MaxJobCount = 200000`, Slurm 25.05.5.
-- `/cluster/project/platt/$USER/envs/snakemake` holds snakemake 9.25.1, plugin 2.7.1 and jobstep 0.6.0. `import snakemake_executor_plugin_slurm` resolves to the `lib/python3.12` copy.
-- That environment also has a `lib/python3.1/site-packages` tree holding a second copy of both plugins. Nothing imports it, since `python3.1` is not on `sys.path` for python 3.12, but reading versions off the filesystem there gives the wrong answer; use `importlib.metadata`.
-- `sacct` for the twelve hours to 2026-08-21 11:00: 1546 jobs under run uuid `1e5dfc74-cb86-4539-b5a4-33cba3b9af78`, the fastder simulation driver, one core each, nineteen to sixty-two seconds each. Their `Comment` field names the rule: `eval_fuzzy_metrics` 760 jobs and `run_gffcompare` 680, out of 1546. Those two are what to name in `--slurm-array-jobs` or `--group-components`; the rest of that workflow is tens of jobs.
-- Probe job 11390488, 2026-08-21: `slurm/00_probe.sh` completed in 18 seconds on eu-a2p-480, reporting plugin 2.7.1 unpatched and twelve probe jobs in all three plans.
-- Job 11390936, 2026-08-21, plugin 2.7.1 unpatched, all three modes exit 0. The plain mode cost 12 sbatch calls for 12 jobs, across 8 hosts. The array mode cost one, `sbatch ... --array=1-12`, whose `--wrap` carried `--target-jobs 'probe:task=004'` for every task; all twelve tasks completed with exit 0 in 30 to 41 seconds and all twelve outputs were written, because they started together and the minimum task built job 004 before the others postprocessed. The group mode cost 3 calls for 12 jobs at `--group-components probe_batch=4`, on 3 hosts.
-- `scontrol write batch_script` answered 3 of the 12 group probes and refused the rest, which is why the probe retries and records the error. An empty script and a correct dispatch are otherwise the same record.
-- Job 11395649, 2026-08-21, plugin 2.7.1 patched, 60 tasks. One sbatch call, `--array=1-60` with no `--wrap`, submitted as a script on `/dev/stdin`. All 60 tasks completed, all 60 outputs were written, the driver exited 0. Decoding each task's entry in the payload gives a command targeting that task's own wildcard, 60 of 60, against `probe:task=004` for all twelve of the unpatched array.
-- A record missing and a task that wrote nothing are the same observation, and the failure this measures is missing outputs. `array_experiment.sh` waits for the expected count before verifying and `verify.py --expect` names the shortfall, so a lagging file is not read as lost work. Reading a just written log from a login node hit the same lag on 2026-08-21, when `ls` reported a file absent that the directory listing showed seconds later.
-- The patched batch script carries no plain `--target-jobs`; the target is base64 and zlib inside the payload. The first patched run therefore reported itself unchecked rather than correct, and `probe.py` now decodes its own task's entry.
+eu-login-44, 2026-08-21: `MaxArraySize = 15000`, `MaxJobCount = 200000`, Slurm 25.05.5. `/cluster/project/platt/$USER/envs/snakemake` holds snakemake 9.25.1, plugin 2.7.1, jobstep 0.6.0.
+
+| job | patched | tasks | mode | sbatch calls | wrapper target | outputs | exit |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 11390936 | no | 12 | plain | 12 | own | 12 | 0 |
+| 11390936 | no | 12 | array | 1 | task 004, 12 of 12 | 12 | 0 |
+| 11390936 | no | 12 | group | 3 | own group's member | 12 | 0 |
+| 11399743 | no | 60 | array | 1 | task 006, 59 of 60 | 60 | 0 |
+| 11395649 | yes | 60 | array | 1 | own, 60 of 60 | 60 | 0 |
+| 11400849 | yes | 60 | array | 1 | own, 60 of 60 | 60 | 0 |
+
+In 11399743 the tasks did not start together: 50 at 13:06:37 and 10 at 13:07:31.
+
+That environment also carries a `lib/python3.1/site-packages` tree with a second copy of both plugins. Nothing imports it, but reading versions off the filesystem there gives the wrong answer; use `importlib.metadata`.
+
+Four defects in the harness, found by those runs:
+
+- The ancestry cannot see the wrapper, so 11390936 reported an array with the wrong target as correct. The probe reads the batch script now.
+- A group member's wrapper names another member legitimately, and was reported as a mismatch.
+- `scontrol write batch_script` answered 3 of 12 probes asking at once. The probe retries and records the error.
+- `diagnose.sh` grepped the driver log for `MissingOutputException`, which `verify.py` prints in its own verdict, so it reported its own output as an error.

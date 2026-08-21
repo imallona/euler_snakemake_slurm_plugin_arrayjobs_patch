@@ -164,15 +164,21 @@ def verdict_lines(rows, expected=0):
         lines.append(
             f"DISPATCH MISMATCH on {len(mismatched)} of {total} tasks. The "
             "wrapper was told to build a different task's output than the one "
-            "that ran here. It checks its own target when the inner command "
-            "returns, does not find it, and raises MissingOutputException "
-            "naming a task this job never had. This is the array dispatch "
-            "defect in snakemake-executor-plugin-slurm 2.7.1 and 2.8.0."
+            "that ran here. When the inner command returns it checks its own "
+            "target, waits out latency-wait, and fails if the task holding "
+            "that target has not finished. This is the array dispatch defect "
+            "in snakemake-executor-plugin-slurm 2.7.1 and 2.8.0."
         )
-        for row in mismatched:
+        for row in mismatched[:MISMATCH_LINES]:
             lines.append(
                 f"  task {row['task']} (array task {row['array_task_id']}) ran under "
                 f"a wrapper targeting task {row['wrapper_tasks']}"
+            )
+        if len(mismatched) > MISMATCH_LINES:
+            targets = sorted({row["wrapper_tasks"] for row in mismatched})
+            lines.append(
+                f"  and {len(mismatched) - MISMATCH_LINES} more, targeting "
+                f"{', '.join(targets)}"
             )
     elif arrayed:
         lines.append("")
@@ -240,6 +246,9 @@ def verdict_lines(rows, expected=0):
         )
     return lines
 
+
+# Enough to see the pattern. The summary table holds every row.
+MISMATCH_LINES = 5
 
 COLUMNS = (
     "task",

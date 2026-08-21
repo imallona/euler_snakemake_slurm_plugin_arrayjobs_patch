@@ -60,7 +60,9 @@ echo
 
 echo "=================== missing output errors ==================="
 # A task told to build another task's output names a wildcard it never had.
-grep -A 4 "MissingOutputException" "$driver_log" | head -60
+# Anchored on snakemake's own wording, because this script also prints
+# verify.py's verdict, and that names the exception too.
+grep -A 4 "^MissingOutputException\|Error in rule\|^Missing files after" "$driver_log" | head -60
 if [ -d slurm/snakemake_logs ]; then
     echo
     echo "per job logs under slurm/snakemake_logs:"

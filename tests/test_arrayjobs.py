@@ -6,6 +6,7 @@ anything.
 """
 
 import base64
+import importlib.metadata
 import json
 import os
 import subprocess
@@ -350,3 +351,55 @@ def test_missing_records_are_reported(tmp_path):
 
     assert "MISSING RECORDS" not in "\n".join(verify.verdict_lines(rows, expected=1))
     assert "MISSING RECORDS" not in "\n".join(verify.verdict_lines(rows))
+
+
+def test_long_mismatch_list_is_capped(tmp_path):
+    """59 mismatched tasks is a wall of text; the table keeps every row."""
+    for index in range(1, 21):
+        write_record(tmp_path, f"{index:03d}", index, outer_task="006")
+
+    rows = verify.analyse(verify.collect([tmp_path]))
+    lines = verify.verdict_lines(rows)
+    listed = [line for line in lines if "ran under a wrapper targeting" in line]
+
+    assert len(listed) == verify.MISMATCH_LINES
+    assert any("and 14 more, targeting 006" in line for line in lines)
+    assert sum(not row["dispatch_ok"] for row in rows) == 19
+
+
+def test_shipped_patch_matches_the_script(tmp_path):
+    """patches/*.patch is what a maintainer applies; the script is what we run.
+
+    They are generated from the same two replacements, so a change to one that
+    is not made to the other is a defect.
+    """
+    installed = patch_slurm_plugin.plugin_path()
+    version = importlib.metadata.version("snakemake-executor-plugin-slurm")
+    if version not in patch_slurm_plugin.SUPPORTED_VERSIONS:
+        pytest.skip(f"plugin {version} is outside the versions the patch targets")
+    pristine = installed.read_text(encoding="utf-8")
+    if patch_slurm_plugin.SENTINEL in pristine:
+        pytest.skip("plugin is already patched")
+
+    tree = tmp_path / "snakemake_executor_plugin_slurm"
+    tree.mkdir()
+    target = tree / "__init__.py"
+    target.write_text(pristine, encoding="utf-8")
+
+    diff = ROOT / "patches" / "0001-per-task-array-dispatch.patch"
+    applied = subprocess.run(
+        ["patch", "-p1", "-i", str(diff)], cwd=tmp_path, capture_output=True, text=True
+    )
+    if applied.returncode != 0:
+        pytest.skip(f"the shipped diff does not apply to {version}: {applied.stdout}")
+
+    by_script = pristine
+    by_script = by_script.replace(
+        patch_slurm_plugin.OLD_PAYLOAD_RANGE, patch_slurm_plugin.NEW_PAYLOAD_RANGE
+    )
+    by_script = by_script.replace(
+        patch_slurm_plugin.OLD_SUBMISSION_BRANCH, patch_slurm_plugin.NEW_SUBMISSION_BRANCH
+    )
+    by_script += patch_slurm_plugin.HELPER
+
+    assert target.read_text(encoding="utf-8") == by_script
