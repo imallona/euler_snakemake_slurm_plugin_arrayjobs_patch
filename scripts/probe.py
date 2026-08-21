@@ -12,12 +12,15 @@ of the chain that is visible.
 """
 
 import argparse
+import base64
+import binascii
 import json
 import os
 import re
 import socket
 import subprocess
 import time
+import zlib
 from pathlib import Path
 
 # Everything Slurm says about this task's place in an array, plus the scratch
@@ -142,6 +145,33 @@ def specs_in_text(text):
     return specs
 
 
+def specs_in_dispatch_payload(text, task_id):
+    """--target-jobs of this task's entry in a patched dispatch script.
+
+    scripts/patch_slurm_plugin.py replaces the plain wrapper with a script
+    holding a base64 mapping of array task id to a zlib compressed command, so
+    the target is no longer plain text and has to be decoded to be checked.
+    """
+    if not task_id:
+        return []
+    for match in re.finditer(r"[A-Za-z0-9+/=]{64,}", text):
+        try:
+            mapping = json.loads(base64.b64decode(match.group(0)))
+            command = zlib.decompress(bytes.fromhex(mapping[str(task_id)])).decode()
+        except (
+            binascii.Error,
+            json.JSONDecodeError,
+            KeyError,
+            TypeError,
+            UnicodeDecodeError,
+            ValueError,
+            zlib.error,
+        ):
+            continue
+        return specs_in_text(command)
+    return []
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--task", required=True, help="the task wildcard of this job")
@@ -170,6 +200,12 @@ def main():
 
     script, script_error = batch_script()
     script_specs = specs_in_text(script)
+    script_source = "plain" if script_specs else ""
+    if not script_specs and script:
+        script_specs = specs_in_dispatch_payload(
+            script, os.environ.get("SLURM_ARRAY_TASK_ID")
+        )
+        script_source = "dispatch_payload" if script_specs else "no_target"
 
     if args.sleep > 0:
         time.sleep(args.sleep)
@@ -186,6 +222,7 @@ def main():
         "batch_script": {
             "target_job_specs": script_specs,
             "target_tasks": tasks_in_specs(script_specs),
+            "source": script_source,
             "error": script_error,
             "text": script,
         },

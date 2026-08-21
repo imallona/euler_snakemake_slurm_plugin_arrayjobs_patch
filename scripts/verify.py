@@ -19,6 +19,10 @@ import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from probe import specs_in_dispatch_payload, tasks_in_specs  # noqa: E402
+
 
 def collect(paths):
     """Read every probe record named by a list of files or directories."""
@@ -55,6 +59,16 @@ def wrapper_target(record):
     tasks = script.get("target_tasks") or []
     if tasks:
         return tasks, "batch_script"
+    text = script.get("text")
+    if text:
+        # A patched plugin encodes the target, so the script holds no readable
+        # one. Decoding here as well as in probe.py lets records written before
+        # probe.py could decode be checked without another run.
+        task_id = (record.get("slurm") or {}).get("SLURM_ARRAY_TASK_ID")
+        decoded = tasks_in_specs(specs_in_dispatch_payload(text, task_id))
+        if decoded:
+            return decoded, "batch_script"
+        return [], "script_no_target"
 
     links = record.get("snakemake_links") or []
     if links:
@@ -153,14 +167,24 @@ def verdict_lines(rows):
             )
     elif arrayed:
         lines.append("")
-        if any(row["wrapper_source"] != "batch_script" for row in arrayed):
+        unchecked = [row for row in arrayed if row["wrapper_source"] != "batch_script"]
+        if unchecked:
             # srun hides the wrapper from the ancestry, so every task reads as
             # correct whether it is or not.
             lines.append(
-                "No task read its batch script, so the wrapper's target is "
-                "unknown and this run says nothing about the dispatch. Check "
-                "that scontrol is on PATH in the job."
+                f"{len(unchecked)} of {len(arrayed)} array tasks were not "
+                "checked, so this run says nothing about their dispatch."
             )
+            if any(row["wrapper_source"] == "script_no_target" for row in unchecked):
+                lines.append(
+                    "Their batch script names no target. A patched plugin "
+                    "encodes it, so probe.py has to decode the payload."
+                )
+            else:
+                lines.append(
+                    "They read no batch script. Check that scontrol is on PATH "
+                    "in the job and answering."
+                )
         else:
             lines.append(
                 "Every array task ran under a wrapper targeting its own job. "

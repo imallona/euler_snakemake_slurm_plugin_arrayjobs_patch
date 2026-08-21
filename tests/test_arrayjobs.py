@@ -5,10 +5,12 @@ dispatch and like a correct one, so the detection runs without submitting
 anything.
 """
 
+import base64
 import json
 import os
 import subprocess
 import sys
+import zlib
 from pathlib import Path
 
 import pytest
@@ -210,7 +212,8 @@ def test_ancestry_only_array_run_is_inconclusive(tmp_path):
     rows = verify.analyse(verify.collect([tmp_path]))
     text = "\n".join(verify.verdict_lines(rows))
     assert all(row["wrapper_source"] == "ancestry" for row in rows)
-    assert "says nothing about the dispatch" in text
+    assert "2 of 2 array tasks were not checked" in text
+    assert "read no batch script" in text
     assert "dispatch is correct" not in text
 
 
@@ -264,3 +267,73 @@ def test_replace_atomically_breaks_hardlinks(tmp_path):
     assert installed.read_text() == "patched\n"
     assert cached.read_text() == "original\n"
     assert installed.stat().st_nlink == 1
+
+
+def build_dispatch_script(commands):
+    """A batch script shaped like the one patch_slurm_plugin.py submits."""
+    payload = base64.b64encode(
+        json.dumps(
+            {task: zlib.compress(command.encode(), 9).hex() for task, command in commands.items()}
+        ).encode()
+    ).decode()
+    return f"#!/bin/sh\nset -e\nsnakemake_call=$(python -c 'decode' {payload})\neval \"$snakemake_call\"\n"
+
+
+def test_probe_decodes_a_patched_dispatch_script():
+    """The patch encodes the target, so plain matching finds nothing."""
+    import probe
+
+    script = build_dispatch_script(
+        {
+            "1": "snakemake --target-jobs 'probe:task=001' --executor slurm-jobstep",
+            "7": "snakemake --target-jobs 'probe:task=007' --executor slurm-jobstep",
+        }
+    )
+    assert probe.specs_in_text(script) == []
+    assert probe.specs_in_dispatch_payload(script, "7") == ["probe:task=007"]
+    assert probe.tasks_in_specs(probe.specs_in_dispatch_payload(script, "1")) == ["001"]
+    assert probe.specs_in_dispatch_payload(script, "99") == []
+    assert probe.specs_in_dispatch_payload("#!/bin/sh\ntrue\n", "1") == []
+
+
+def test_unreadable_target_is_not_reported_as_correct(tmp_path):
+    """A script read but not understood must not pass as a correct dispatch."""
+    for index, task in enumerate(["001", "002"], start=1):
+        path = write_record(tmp_path, task, index, outer_task=task)
+        record = json.loads(path.read_text())
+        record["batch_script"] = {"target_job_specs": [], "target_tasks": [], "text": "#!/bin/sh\n"}
+        path.write_text(json.dumps(record))
+
+    rows = verify.analyse(verify.collect([tmp_path]))
+    text = "\n".join(verify.verdict_lines(rows))
+    assert all(row["wrapper_source"] == "script_no_target" for row in rows)
+    assert "2 of 2 array tasks were not checked" in text
+    assert "has to decode the payload" in text
+    assert "dispatch is correct" not in text
+
+
+def test_verify_decodes_a_record_probe_could_not(tmp_path):
+    """Records written before probe.py could decode are still checkable."""
+    for task_id, task in ((1, "001"), (7, "007")):
+        path = write_record(tmp_path, task, task_id, outer_task=task)
+        record = json.loads(path.read_text())
+        record["slurm"]["SLURM_ARRAY_TASK_ID"] = str(task_id)
+        record["batch_script"] = {
+            "target_job_specs": [],
+            "target_tasks": [],
+            "text": build_dispatch_script(
+                {
+                    "1": "snakemake --target-jobs 'probe:task=001'",
+                    "7": "snakemake --target-jobs 'probe:task=009'",
+                }
+            ),
+        }
+        path.write_text(json.dumps(record))
+
+    rows = verify.analyse(verify.collect([tmp_path]))
+    by_task = {row["task"]: row for row in rows}
+    assert by_task["001"]["wrapper_source"] == "batch_script"
+    assert by_task["001"]["dispatch_ok"] is True
+    # Task 7's payload entry names 009, so the decode has to catch it.
+    assert by_task["007"]["wrapper_tasks"] == "009"
+    assert by_task["007"]["dispatch_ok"] is False
